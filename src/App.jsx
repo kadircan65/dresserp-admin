@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 const API = import.meta.env.VITE_API_URL;
 const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN;
+
 function App() {
 
   const [products, setProducts] = useState([]);
@@ -10,9 +11,19 @@ function App() {
 
   // Ürünleri yükle
   const loadProducts = async () => {
-    const res = await fetch(`${API}/products`);
-    const data = await res.json();
-    setProducts(Array.isArray(data) ? data : data.rows || []);
+    try {
+      const res = await fetch(`${API}/products`);
+      const data = await res.json();
+
+      if (Array.isArray(data)) {
+        setProducts(data);
+      } else {
+        setProducts([]);
+      }
+
+    } catch (err) {
+      console.error("Load error:", err);
+    }
   };
 
   useEffect(() => {
@@ -21,11 +32,14 @@ function App() {
 
   // Ürün ekle
   const addProduct = async () => {
+
+    if (!name || !price) return;
+
     await fetch(`${API}/admin/products`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "admin-token": ADMIN_TOKEN
+        "x-admin-token": ADMIN_TOKEN
       },
       body: JSON.stringify({
         name,
@@ -40,10 +54,11 @@ function App() {
 
   // Ürün sil
   const deleteProduct = async (id) => {
+
     await fetch(`${API}/admin/products/${id}`, {
       method: "DELETE",
       headers: {
-        "admin-token": ADMIN_TOKEN
+        "x-admin-token": ADMIN_TOKEN
       }
     });
 
@@ -51,7 +66,8 @@ function App() {
   };
 
   return (
-    <div style={{ padding: 40 }}>
+    <div style={{padding:20}}>
+
       <h1>DRESSERP ADMIN</h1>
 
       <h2>Ürün Ekle</h2>
@@ -59,13 +75,13 @@ function App() {
       <input
         placeholder="Ürün adı"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={e => setName(e.target.value)}
       />
 
       <input
         placeholder="Fiyat"
         value={price}
-        onChange={(e) => setPrice(e.target.value)}
+        onChange={e => setPrice(e.target.value)}
       />
 
       <button onClick={addProduct}>
@@ -76,9 +92,9 @@ function App() {
 
       {products.map(p => (
         <div key={p.id}>
-          {p.name} - {p.price} TL
+          {p.name} - {p.price}
           <button onClick={() => deleteProduct(p.id)}>
-            SİL
+            Sil
           </button>
         </div>
       ))}
