@@ -44,7 +44,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/admin/products`, {
+      const res = await fetch(`${API_BASE}/products`, {
         method: "GET",
         headers: authHeaders(),
       });
@@ -82,7 +82,7 @@ export default function App() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/admin/products`, {
+      const res = await fetch(`${API_BASE}/products`, {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
@@ -120,7 +120,7 @@ export default function App() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/admin/products/${id}`, {
+      const res = await fetch(`${API_BASE}/products/${id}`, {
         method: "DELETE",
         headers: authHeaders(),
       });
