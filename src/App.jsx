@@ -1,292 +1,282 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function App() {
-  // 1) API URL (Vercel/Vite env varsa onu kullan, yoksa Railway backend'e düş)
-  const API_BASE = useMemo(() => {
-    return (
-      import.meta?.env?.VITE_API_URL ||
-      "https://dresserp-backend-production.up.railway.app"
-    );
-  }, []);
+  const API_BASE_RAW = import.meta.env.VITE_API_BASE || "";
+  const [adminToken, setAdminToken] = useState(import.meta.env.VITE_ADMIN_TOKEN || "");
 
-  // 2) Token (env varsa al, yoksa localStorage’dan al, yoksa kullanıcı girsin)
-  const [token, setToken] = useState(() => {
-    return (
-      import.meta?.env?.VITE_ADMIN_TOKEN ||
-      localStorage.getItem("ADMIN_TOKEN") ||
-      ""
-    );
-  });
-
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  // Form state
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [image, setImage] = useState("");
 
-  // UI state
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
-  const [okMsg, setOkMsg] = useState("");
 
-  function authHeaders(extra = {}) {
-    return {
-      "Content-Type": "application/json",
-      "x-admin-token": token,
-      ...extra,
+  // --- URL builder: API_BASE "/api" ile bitse de bitmese de doğru endpoint üretir
+  const api = useMemo(() => {
+    const base = (API_BASE_RAW || "").trim().replace(/\/+$/, ""); // sondaki / temizle
+    const hasApi = /\/api$/i.test(base);
+
+    const withApi = hasApi ? base : `${base}/api`;
+
+    const join = (path) => {
+      const p = String(path || "").trim();
+      if (!p.startsWith("/")) return `${withApi}/${p}`;
+      return `${withApi}${p}`;
     };
-  }
 
-  async function fetchProducts() {
+    return { base, withApi, join };
+  }, [API_BASE_RAW]);
+
+  const authHeaders = () => {
+    const t = (adminToken || "").trim();
+    if (!t) return {};
+    // Backend senin önceki ekranlarında x-admin-token bekliyor gibiydi
+    return { "x-admin-token": t };
+  };
+
+  const fetchProducts = async () => {
     setError("");
-    setOkMsg("");
+    setMsg("");
     setLoading(true);
-
     try {
-      const res = await fetch(`${API_BASE}/api/products`, {
+      const res = await fetch(api.join("/products"), {
         method: "GET",
-        headers: authHeaders(),
+        headers: {
+          ...authHeaders(),
+        },
       });
 
+      const txt = await res.text();
       if (!res.ok) {
-        const txt = await safeText(res);
-        throw new Error(
-          `Products alınamadı (${res.status}). ${txt || "Token/URL kontrol et."}`
-        );
+        throw new Error(`Products alınamadı (${res.status}): ${txt}`);
       }
 
-      const data = await res.json();
-      // Backend array dönüyorsa direkt, {rows:[]} dönüyorsa onu al
-      const list = Array.isArray(data) ? data : data?.rows || [];
+      let data;
+      try {
+        data = JSON.parse(txt);
+      } catch {
+        throw new Error(`JSON parse edilemedi: ${txt}`);
+      }
+
+      // Backend bazen {products:[...]} bazen direkt [...] döndürüyor olabilir:
+      const list = Array.isArray(data) ? data : Array.isArray(data?.products) ? data.products : [];
       setProducts(list);
+      setMsg(`Ürünler geldi: ${list.length}`);
     } catch (e) {
-      setError(e.message || "Bir hata oldu.");
+      setError(e?.message || "Bilinmeyen hata");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function addProduct() {
+  const addProduct = async () => {
     setError("");
-    setOkMsg("");
+    setMsg("");
 
-    const trimmed = name.trim();
-    if (!trimmed) return setError("Ürün adı boş olamaz.");
+    const n = name.trim();
+    const p = Number(price);
 
-    // fiyatı sayıya çevir
-    const priceNum = Number(String(price).replace(",", "."));
-    if (!Number.isFinite(priceNum) || priceNum <= 0) {
-      return setError("Fiyat sayı olmalı ve 0'dan büyük olmalı.");
-    }
+    if (!n) return setError("Ürün adı boş olamaz.");
+    if (!Number.isFinite(p) || p <= 0) return setError("Fiyat geçersiz.");
+    if (!adminToken.trim()) return setError("ADMIN TOKEN boş. Token girmen lazım.");
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/products`, {
+      const res = await fetch(api.join("/products"), {
         method: "POST",
-        headers: authHeaders(),
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
         body: JSON.stringify({
-          name: trimmed,
-          price: priceNum,
-          image: image.trim() || null,
+          name: n,
+          price: p,
+          image: image.trim() || "",
         }),
       });
 
+      const txt = await res.text();
       if (!res.ok) {
-        const txt = await safeText(res);
-        throw new Error(
-          `Ekleme başarısız (${res.status}). ${txt || "Token/DB kontrol et."}`
-        );
+        throw new Error(`Ekleme başarısız (${res.status}): ${txt}`);
       }
 
+      setMsg("Ürün eklendi.");
       setName("");
       setPrice("");
       setImage("");
-      setOkMsg("✅ Ürün eklendi.");
-
       await fetchProducts();
     } catch (e) {
-      setError(e.message || "Ekleme sırasında hata oldu.");
+      setError(e?.message || "Bilinmeyen hata");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function deleteProduct(id) {
+  const deleteProduct = async (id) => {
     setError("");
-    setOkMsg("");
+    setMsg("");
 
-    if (!id && id !== 0) return setError("Silinecek ürün id bulunamadı.");
+    if (!id) return setError("Silinecek ürün id yok.");
+    if (!adminToken.trim()) return setError("ADMIN TOKEN boş. Token girmen lazım.");
+
+    const ok = window.confirm("Bu ürünü silmek istediğine emin misin?");
+    if (!ok) return;
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/products/${id}`, {
+      const res = await fetch(api.join(`/products/${id}`), {
         method: "DELETE",
-        headers: authHeaders(),
+        headers: {
+          ...authHeaders(),
+        },
       });
 
+      const txt = await res.text();
       if (!res.ok) {
-        const txt = await safeText(res);
-        throw new Error(
-          `Silme başarısız (${res.status}). ${txt || "Token/ID kontrol et."}`
-        );
+        throw new Error(`Silme başarısız (${res.status}): ${txt}`);
       }
 
-      setOkMsg("🗑️ Ürün silindi.");
+      setMsg("Ürün silindi.");
       await fetchProducts();
     } catch (e) {
-      setError(e.message || "Silme sırasında hata oldu.");
+      setError(e?.message || "Bilinmeyen hata");
     } finally {
       setLoading(false);
     }
-  }
-
-  function saveToken() {
-    localStorage.setItem("ADMIN_TOKEN", token);
-    setOkMsg("🔐 Token kaydedildi.");
-    setError("");
-  }
+  };
 
   useEffect(() => {
-    // Token varsa otomatik çek
-    if (token) fetchProducts();
+    // sayfa açılır açılmaz listeyi çek
+    if (api.base) fetchProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, API_BASE]);
+  }, [api.withApi]);
 
   return (
-    <div style={{ padding: 16, fontFamily: "Arial, sans-serif", maxWidth: 900 }}>
-      <h2>Dresserp Admin</h2>
+    <div style={{ maxWidth: 900, margin: "30px auto", padding: 16, fontFamily: "system-ui" }}>
+      <h1>DressERP Admin</h1>
 
-      <div style={{ marginBottom: 12, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <label style={{ minWidth: 95 }}>API URL</label>
-          <input
-            value={API_BASE}
-            readOnly
-            style={{ flex: 1, minWidth: 280, padding: 8 }}
-          />
+      <div style={{ marginBottom: 14, padding: 12, border: "1px solid #444", borderRadius: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>API BASE</div>
+            <input
+              value={API_BASE_RAW}
+              readOnly
+              style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #555", background: "#111", color: "#ddd" }}
+            />
+            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+              Çözülen base: <b>{api.withApi || "-"}</b>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>ADMIN TOKEN</div>
+            <input
+              value={adminToken}
+              onChange={(e) => setAdminToken(e.target.value)}
+              placeholder="ADMIN TOKEN"
+              style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #555", background: "#111", color: "#ddd" }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button onClick={() => fetchProducts()} disabled={loading} style={btnStyle}>
+                Yenile
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
-          <label style={{ minWidth: 95 }}>ADMIN TOKEN</label>
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="x-admin-token değeri"
-            style={{ flex: 1, minWidth: 280, padding: 8 }}
-          />
-          <button onClick={saveToken} style={{ padding: "8px 12px" }}>
-            Kaydet
-          </button>
-          <button onClick={fetchProducts} style={{ padding: "8px 12px" }}>
-            Yenile
-          </button>
-        </div>
-
-        {error ? (
-          <div style={{ marginTop: 10, color: "crimson" }}>❌ {error}</div>
-        ) : null}
-        {okMsg ? (
-          <div style={{ marginTop: 10, color: "green" }}>{okMsg}</div>
-        ) : null}
-        {loading ? (
-          <div style={{ marginTop: 10 }}>⏳ İşleniyor...</div>
-        ) : null}
+        {loading && <div style={{ marginTop: 10, opacity: 0.85 }}>Yükleniyor...</div>}
+        {msg && <div style={{ marginTop: 10, color: "#6ee7b7" }}>{msg}</div>}
+        {error && <div style={{ marginTop: 10, color: "#fb7185", whiteSpace: "pre-wrap" }}>{error}</div>}
       </div>
 
-      <div style={{ marginBottom: 12, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <h3>Ürün Ekle</h3>
-        <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ marginBottom: 14, padding: 12, border: "1px solid #444", borderRadius: 10 }}>
+        <h2>Ürün Ekle</h2>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <input
-            placeholder="Ürün adı"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{ padding: 8 }}
+            placeholder="Ürün adı"
+            style={inpStyle}
           />
           <input
-            placeholder="Fiyat (örn: 1500)"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            style={{ padding: 8 }}
+            placeholder="Fiyat (örn 1500)"
+            style={inpStyle}
           />
           <input
-            placeholder="Resim URL (opsiyonel)"
             value={image}
             onChange={(e) => setImage(e.target.value)}
-            style={{ padding: 8 }}
+            placeholder="Resim URL (opsiyonel)"
+            style={inpStyle}
           />
-          <button onClick={addProduct} style={{ padding: "10px 12px", width: 160 }}>
+          <button onClick={addProduct} disabled={loading} style={btnStyle}>
             EKLE
           </button>
         </div>
       </div>
 
-      <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-        <h3>Ürün Listesi ({products.length})</h3>
+      <div style={{ padding: 12, border: "1px solid #444", borderRadius: 10 }}>
+        <h2>Ürün Listesi ({products.length})</h2>
 
         {products.length === 0 ? (
-          <div>Liste boş (ya gerçekten boş ya da yetki/endpoint sorunu var).</div>
+          <div style={{ opacity: 0.8 }}>Liste boş (ya gerçekten boş ya da endpoint/token sorunu var).</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {products.map((p) => (
-              <div
-                key={p.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  padding: 10,
-                  border: "1px solid #eee",
-                  borderRadius: 8,
-                }}
-              >
-                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                  {p.image ? (
-                    <img
-                      src={p.image}
-                      alt={p.name}
-                      style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6 }}
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
-                    />
-                  ) : null}
-
+              <div key={p._id || p.id} style={{ border: "1px solid #555", borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                   <div>
                     <div style={{ fontWeight: 700 }}>{p.name}</div>
-                    <div style={{ opacity: 0.8 }}>
-                      ID: {p.id} · Fiyat: {p.price}
-                    </div>
+                    <div style={{ opacity: 0.85 }}>ID: {p._id || p.id}</div>
+                    <div style={{ opacity: 0.85 }}>Fiyat: {p.price}</div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {p.image ? (
+                      <img src={p.image} alt={p.name} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 10 }} />
+                    ) : null}
+                    <button
+                      onClick={() => deleteProduct(p._id || p.id)}
+                      disabled={loading}
+                      style={{ ...btnStyle, background: "#2a0f14", borderColor: "#7f1d1d" }}
+                    >
+                      SİL
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  onClick={() => deleteProduct(p.id)}
-                  style={{
-                    padding: "8px 12px",
-                    background: "#ffe6e6",
-                    border: "1px solid #ffb3b3",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                  }}
-                >
-                  SİL
-                </button>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <div style={{ marginTop: 16, fontSize: 12, opacity: 0.8 }}>
+        Debug: products endpoint =&gt; <b>{api.join("/products")}</b>
+      </div>
     </div>
   );
 }
 
-// küçük yardımcı: hata body’sini patlatmadan oku
-async function safeText(res) {
-  try {
-    return await res.text();
-  } catch {
-    return "";
-  }
-}
+const btnStyle = {
+  padding: "10px 14px",
+  borderRadius: 10,
+  border: "1px solid #555",
+  background: "#111",
+  color: "#ddd",
+  cursor: "pointer",
+};
+
+const inpStyle = {
+  flex: 1,
+  minWidth: 220,
+  padding: 10,
+  borderRadius: 8,
+  border: "1px solid #555",
+  background: "#111",
+  color: "#ddd",
+};
