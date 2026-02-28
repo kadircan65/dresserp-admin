@@ -1,123 +1,107 @@
 // src/App.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "").trim();
-const ADMIN_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN || "").trim();
 
-function joinUrl(base, path) {
-  const b = base.replace(/\/+$/, "");
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${b}${p}`;
+// .env boşsa deploy kırılmasın diye ekrana net hata basalım
+if (!API_BASE) {
+  console.error("VITE_API_BASE eksik! Vercel/Local env ayarla.");
 }
 
-async function safeText(res) {
-  try {
-    return await res.text();
-  } catch {
-    return "";
-  }
+function joinUrl(base, path) {
+  const b = String(base || "").replace(/\/+$/, "");
+  const p = String(path || "").replace(/^\/+/, "");
+  return `${b}/${p}`;
 }
 
 export default function App() {
-  const [products, setProducts] = useState([]);
+  const apiBase = useMemo(() => API_BASE, []);
+  const [adminToken, setAdminToken] = useState("");
+
   const [status, setStatus] = useState("Yükleniyor...");
   const [error, setError] = useState("");
+  const [products, setProducts] = useState([]);
+
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
 
-  const hasEnv = Boolean(API_BASE);
-
   const healthCheck = async () => {
-    const r = await fetch(joinUrl(API_BASE, "/health"));
-    if (!r.ok) throw new Error("Health failed");
+    const r = await fetch(joinUrl(apiBase, "/health"), { cache: "no-store" });
+    if (!r.ok) throw new Error(`Health failed: ${r.status}`);
     return r.json();
   };
 
-  const getProducts = async () => {
-    const r = await fetch(joinUrl(API_BASE, "/api/products"));
-    if (!r.ok) throw new Error("Products failed");
+  const fetchProducts = async () => {
+    const r = await fetch(joinUrl(apiBase, "/api/products"), {
+      cache: "no-store",
+    });
+    if (!r.ok) throw new Error(`Products failed: ${r.status}`);
     return r.json();
   };
 
   const addProduct = async () => {
-    setError("");
+    const payload = { name, price: Number(price) || 0 };
 
-    if (!ADMIN_TOKEN) {
-      setError("VITE_ADMIN_TOKEN ENV eksik. Vercel'e ekle ve redeploy et.");
-      return;
-    }
-
-    const payload = {
-      name: name.trim(),
-      price: Number(price),
-    };
-
-    if (!payload.name) {
-      setError("Ürün adı boş olamaz.");
-      return;
-    }
-    if (!Number.isFinite(payload.price) || payload.price <= 0) {
-      setError("Fiyat geçersiz.");
-      return;
-    }
-
-    const r = await fetch(joinUrl(API_BASE, "/api/products"), {
+    const r = await fetch(joinUrl(apiBase, "/api/products"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-token": ADMIN_TOKEN,
+        // backend senin tokeni hangi header ile bekliyorsa onu kullan:
+        // çoğunlukla: Authorization: Bearer <token>
+        Authorization: `Bearer ${adminToken}`,
       },
       body: JSON.stringify(payload),
     });
 
-    const txt = await safeText(r);
-    let data;
-    try {
-      data = txt ? JSON.parse(txt) : null;
-    } catch {
-      data = { raw: txt };
-    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `Add failed: ${r.status}`);
 
-    if (!r.ok) {
-      throw new Error(data?.error || "Add failed");
-    }
-
-    // başarılıysa listeyi tazele
-    const list = await getProducts();
-    setProducts(Array.isArray(list) ? list : []);
-    setName("");
-    setPrice("");
+    return data;
   };
 
   useEffect(() => {
     const run = async () => {
       setError("");
-
-      if (!hasEnv) {
-        setStatus("HATA");
-        setError("VITE_API_BASE ENV yok. Vercel Environment Variables kontrol.");
-        return;
-      }
-
       try {
+        if (!apiBase) {
+          setStatus("HATA");
+          setError("VITE_API_BASE yok. Vercel env ayarla.");
+          return;
+        }
+
         await healthCheck();
-        const data = await getProducts();
-        setProducts(Array.isArray(data) ? data : []);
+        const list = await fetchProducts();
+        setProducts(Array.isArray(list) ? list : []);
         setStatus("OK");
       } catch (err) {
         console.error(err);
         setStatus("HATA");
-        setError("Backend bağlantı hatası. /health ve /products kontrol.");
+        setError(
+          "Backend bağlantı hatası. VITE_API_BASE, /health ve /api/products kontrol."
+        );
       }
     };
-
     run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [apiBase]);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      await addProduct();
+      setName("");
+      setPrice("");
+      const list = await fetchProducts();
+      setProducts(Array.isArray(list) ? list : []);
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "Ürün ekleme hatası");
+    }
+  };
 
   return (
-    <div style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
+    <div style={{ padding: 24, maxWidth: 560, margin: "0 auto" }}>
       <h1>DRESSERP Admin</h1>
 
       <p>
@@ -125,54 +109,56 @@ export default function App() {
       </p>
 
       <p style={{ opacity: 0.9 }}>
-        API (env): <code>{API_BASE || "(yok)"}</code>
+        API (env): <code>{apiBase || "(VITE_API_BASE yok)"}</code>
       </p>
 
-      {!ADMIN_TOKEN && (
-        <div style={{ background: "#2b0a0a", padding: 12, borderRadius: 8 }}>
-          <b>Uyarı:</b> <code>VITE_ADMIN_TOKEN</code> ENV yok. Ürün ekleme çalışmaz.
-        </div>
-      )}
-
       {error && (
-        <div style={{ background: "#2b0a0a", padding: 12, borderRadius: 8, marginTop: 12 }}>
+        <div style={{ background: "#2b0a0a", padding: 12, borderRadius: 8 }}>
           {error}
         </div>
       )}
 
       <hr style={{ margin: "16px 0" }} />
 
+      <h2>Admin Token</h2>
+      <input
+        value={adminToken}
+        onChange={(e) => setAdminToken(e.target.value)}
+        placeholder="ADMIN TOKEN"
+        style={{ width: "100%", padding: 10 }}
+      />
+
+      <hr style={{ margin: "16px 0" }} />
+
       <h2>Ürün Ekle</h2>
-
-      <input
-        placeholder="Ürün adı"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        style={{ width: "100%", padding: 10, marginBottom: 10 }}
-      />
-
-      <input
-        placeholder="Fiyat (örn 1500)"
-        value={price}
-        onChange={(e) => setPrice(e.target.value)}
-        style={{ width: "100%", padding: 10, marginBottom: 10 }}
-      />
-
-      <button onClick={addProduct} style={{ padding: "10px 16px", cursor: "pointer" }}>
-        EKLE
-      </button>
+      <form onSubmit={onSubmit}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ürün adı"
+          style={{ width: "100%", padding: 10, marginBottom: 10 }}
+        />
+        <input
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="Fiyat (örn 1500)"
+          style={{ width: "100%", padding: 10, marginBottom: 10 }}
+        />
+        <button type="submit" style={{ padding: "10px 16px" }}>
+          EKLE
+        </button>
+      </form>
 
       <hr style={{ margin: "16px 0" }} />
 
       <h2>Ürünler ({products.length})</h2>
-
       {products.length === 0 ? (
         <p>Ürün yok</p>
       ) : (
         <ul>
           {products.map((p, i) => (
-            <li key={p._id || p.id || i}>
-              {p.name || p.title || "Ürün"} {p.price ? `- ${p.price}` : ""}
+            <li key={p.id ?? i}>
+              {p.name ?? p.title ?? "Ürün"} {p.price ? `- ${p.price}` : ""}
             </li>
           ))}
         </ul>
