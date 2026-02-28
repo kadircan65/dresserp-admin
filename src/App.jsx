@@ -16,8 +16,8 @@ function joinUrl(base, path) {
 }
 
 export default function App() {
+  const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || "";
   const apiBase = useMemo(() => API_BASE, []);
-  const [adminToken, setAdminToken] = useState("");
 
   const [status, setStatus] = useState("Yükleniyor...");
   const [error, setError] = useState("");
@@ -46,7 +46,9 @@ export default function App() {
     const r = await fetch(joinUrl(apiBase, "/api/products"), {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+  "Content-Type": "application/json",
+  "x-admin-token": ADMIN_TOKEN,
+},
         // backend senin tokeni hangi header ile bekliyorsa onu kullan:
         // çoğunlukla: Authorization: Bearer <token>
         Authorization: `Bearer ${adminToken}`,
@@ -120,13 +122,6 @@ export default function App() {
 
       <hr style={{ margin: "16px 0" }} />
 
-      <h2>Admin Token</h2>
-      <input
-        value={adminToken}
-        onChange={(e) => setAdminToken(e.target.value)}
-        placeholder="ADMIN TOKEN"
-        style={{ width: "100%", padding: 10 }}
-      />
 
       <hr style={{ margin: "16px 0" }} />
 
