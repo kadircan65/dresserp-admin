@@ -35,7 +35,7 @@ export default function App() {
   };
 
   const getProducts = async () => {
-    const r = await fetch(joinUrl(API_BASE, "/products"));
+    const r = await fetch(joinUrl(API_BASE, "/api/products"));
     if (!r.ok) throw new Error("Products failed");
     return r.json();
   };
@@ -62,7 +62,7 @@ export default function App() {
       return;
     }
 
-    const r = await fetch(joinUrl(API_BASE, "/products"), {
+    const r = await fetch(joinUrl(API_BASE, "/api/products"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
