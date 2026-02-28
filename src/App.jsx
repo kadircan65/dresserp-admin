@@ -1,168 +1,204 @@
 // src/App.jsx
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const DEFAULT_API_BASE = String(import.meta.env.VITE_API_BASE || "").trim();
-const ADMIN_TOKEN = String(import.meta.env.VITE_ADMIN_TOKEN || "").trim();
+// ✅ Sadece ENV'den gelecek (Vercel'de de Environment Variables'tan)
+const API_BASE = String(import.meta.env.VITE_API_BASE || "").trim();
 
+// URL birleştirici (çift slash vs. olmasın)
 function joinUrl(base, path) {
   const b = String(base || "").replace(/\/+$/, "");
-  const p = String(path || "").startsWith("/") ? path : `/${path}`;
-  return `${b}${p}`;
+  const p = String(path || "").replace(/^\/+/, "");
+  return `${b}/${p}`;
+}
+
+async function safeText(res) {
+  try {
+    return await res.text();
+  } catch {
+    return "";
+  }
 }
 
 export default function App() {
+  const [adminToken, setAdminToken] = useState(
+    localStorage.getItem("ADMIN_TOKEN") || ""
+  );
+
   const [products, setProducts] = useState([]);
-  const [status, setStatus] = useState("Yükleniyor...");
-  const [error, setError] = useState("");
-
-  // API base sadece ENV'den (kilitli)
-  const apiBase = useMemo(() => DEFAULT_API_BASE, []);
-
-  const healthCheck = async () => {
-    const r = await fetch(joinUrl(apiBase, "/health"));
-    if (!r.ok) throw new Error(`Health failed: ${r.status}`);
-    return r.json();
-  };
-
-  const getProducts = async () => {
-    const r = await fetch(joinUrl(apiBase, "/api/products"));
-    if (!r.ok) throw new Error(`Products failed: ${r.status}`);
-    return r.json();
-  };
-
-  const addProduct = async (payload) => {
-    const r = await fetch(joinUrl(apiBase, "/api/products"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ADMIN_TOKEN}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      throw new Error(data.error || `Add failed: ${r.status}`);
-    }
-    return data;
-  };
-
-  useEffect(() => {
-    const run = async () => {
-      setError("");
-      try {
-        if (!apiBase) {
-          setStatus("HATA");
-          setError("VITE_API_BASE boş. Vercel ENV'e backend URL gir.");
-          return;
-        }
-
-        await healthCheck();
-        const data = await getProducts();
-
-        setProducts(Array.isArray(data) ? data : []);
-        setStatus("OK");
-      } catch (err) {
-        console.error(err);
-        setStatus("HATA");
-        setError(
-          `Backend bağlantı hatası. API: ${apiBase} | Detay: ${err?.message || err}`
-        );
-      }
-    };
-
-    run();
-  }, [apiBase]);
-
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
 
-  const onAdd = async () => {
-    setError("");
+  const [loading, setLoading] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("Kontrol ediliyor...");
+  const [err, setErr] = useState("");
+
+  // ✅ API Base sabit: sadece ENV
+  const apiBase = API_BASE;
+
+  useEffect(() => {
+    localStorage.setItem("ADMIN_TOKEN", adminToken);
+  }, [adminToken]);
+
+  // ENV kontrol
+  useEffect(() => {
+    if (!apiBase) {
+      setStatusMsg("HATA");
+      setErr(
+        "VITE_API_BASE boş. .env (local) veya Vercel Environment Variables (prod) içinde tanımla."
+      );
+    }
+  }, [apiBase]);
+
+  const headers = useMemo(() => {
+    const h = { "Content-Type": "application/json" };
+    if (adminToken) h["x-admin-token"] = adminToken;
+    return h;
+  }, [adminToken]);
+
+  async function healthCheck() {
+    if (!apiBase) return false;
+
+    setErr("");
     try {
-      if (!ADMIN_TOKEN) {
-        throw new Error("VITE_ADMIN_TOKEN boş. Vercel ENV'de tanımla.");
+      const url = joinUrl(apiBase, "health");
+      const res = await fetch(url);
+      if (!res.ok) {
+        const t = await safeText(res);
+        throw new Error(`Health ${res.status} ${t}`);
+      }
+      return true;
+    } catch (e) {
+      setErr(String(e?.message || e));
+      return false;
+    }
+  }
+
+  async function fetchProducts() {
+    if (!apiBase) return;
+
+    setErr("");
+    setLoading(true);
+    try {
+      // ✅ DOĞRU endpoint
+      const url = joinUrl(apiBase, "api/products");
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        const t = await safeText(res);
+        throw new Error(`Products ${res.status} ${t}`);
       }
 
-      const payload = { name: name.trim(), price: Number(price) || 0 };
-      if (!payload.name) throw new Error("Ürün adı boş olamaz.");
-
-      await addProduct(payload);
-
-      // tekrar listele
-      const data = await getProducts();
+      const data = await res.json();
       setProducts(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setErr(String(e?.message || e));
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function addProduct() {
+    if (!apiBase) return;
+
+    setErr("");
+
+    const n = name.trim();
+    const p = Number(price);
+
+    if (!n) return setErr("Ürün adı boş olamaz.");
+    if (!Number.isFinite(p) || p <= 0) return setErr("Fiyat geçersiz.");
+
+    setLoading(true);
+    try {
+      // ✅ DOĞRU endpoint
+      const url = joinUrl(apiBase, "api/products");
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: n, price: p }),
+      });
+
+      if (!res.ok) {
+        const t = await safeText(res);
+        throw new Error(`Add ${res.status} ${t}`);
+      }
 
       setName("");
       setPrice("");
-      setStatus("OK");
-    } catch (err) {
-      console.error(err);
-      setStatus("HATA");
-      setError(err?.message || String(err));
+      await fetchProducts();
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    (async () => {
+      const ok = await healthCheck();
+      setStatusMsg(ok ? "OK" : "HATA");
+      if (ok) await fetchProducts();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase]);
 
   return (
-    <div style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
+    <div className="container">
       <h1>DRESSERP Admin</h1>
 
-      <p>
-        Durum: <b>{status}</b>
-      </p>
+      <div className="status">
+        <div>Durum: {statusMsg}</div>
 
-      <p style={{ opacity: 0.9 }}>
-        API (env): <b>{apiBase || "-"}</b>
-      </p>
-
-      {error && (
-        <div
-          style={{
-            background: "#2b0a0a",
-            padding: 12,
-            borderRadius: 8,
-            marginTop: 12,
-          }}
-        >
-          {error}
+        {/* ✅ API URL input yok. Sadece gösterim */}
+        <div style={{ marginTop: 8, opacity: 0.9 }}>
+          API (env): <b>{apiBase || "(tanımlı değil)"}</b>
         </div>
-      )}
-
-      <hr style={{ margin: "16px 0" }} />
-
-      <h2>Ürün Ekle</h2>
-
-      <div style={{ display: "grid", gap: 10, marginBottom: 12 }}>
-        <input
-          placeholder="Ürün adı"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          placeholder="Fiyat (örn 1500)"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-        />
-        <button onClick={onAdd}>EKLE</button>
       </div>
 
-      <hr style={{ margin: "16px 0" }} />
+      {err ? <div className="error">{err}</div> : null}
+
+      <hr />
+
+      <h2>Admin Token</h2>
+      <input
+        value={adminToken}
+        onChange={(e) => setAdminToken(e.target.value)}
+        placeholder="ADMIN TOKEN"
+      />
+
+      <hr />
+
+      <h2>Ürün Ekle</h2>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Ürün adı"
+      />
+      <input
+        value={price}
+        onChange={(e) => setPrice(e.target.value)}
+        placeholder="Fiyat (örn 1500)"
+      />
+      <button onClick={addProduct} disabled={loading}>
+        {loading ? "Bekle..." : "EKLE"}
+      </button>
+
+      <hr />
 
       <h2>Ürünler ({products.length})</h2>
+      <button onClick={fetchProducts} disabled={loading}>
+        {loading ? "Yükleniyor..." : "Yenile"}
+      </button>
 
-      {products.length === 0 ? (
-        <p>Ürün yok</p>
-      ) : (
-        <ul>
-          {products.map((p, i) => (
-            <li key={p.id ?? i}>
-              {p.name ?? p.title ?? "Ürün"}{" "}
-              {p.price !== undefined && p.price !== null ? `- ${p.price}` : ""}
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul>
+        {products.map((p) => (
+          <li key={p.id ?? `${p.name}-${p.price}`}>
+            {p.name} - {p.price}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
