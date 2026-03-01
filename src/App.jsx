@@ -2,10 +2,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-// ✅ Sadece ENV'den gelecek (Vercel'de de Environment Variables'tan)
+// ✅ Sadece ENV'den gelecek
 const API_BASE = String(import.meta.env.VITE_API_BASE || "").trim();
+const ADMIN_TOKEN_ENV = String(import.meta.env.VITE_ADMIN_TOKEN || "").trim();
 
-// URL birleştirici (çift slash vs. olmasın)
+// URL birleştirici
 function joinUrl(base, path) {
   const b = String(base || "").replace(/\/+$/, "");
   const p = String(path || "").replace(/^\/+/, "");
@@ -21,10 +22,6 @@ async function safeText(res) {
 }
 
 export default function App() {
-  const [adminToken, setAdminToken] = useState(
-    localStorage.getItem("ADMIN_TOKEN") || ""
-  );
-
   const [products, setProducts] = useState([]);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
@@ -33,22 +30,23 @@ export default function App() {
   const [statusMsg, setStatusMsg] = useState("Kontrol ediliyor...");
   const [err, setErr] = useState("");
 
-  // ✅ API Base sabit: sadece ENV
+  // ✅ API + Token sabit: sadece ENV
   const apiBase = API_BASE;
-
-  useEffect(() => {
-    localStorage.setItem("ADMIN_TOKEN", adminToken);
-  }, [adminToken]);
+  const adminToken = ADMIN_TOKEN_ENV;
 
   // ENV kontrol
   useEffect(() => {
     if (!apiBase) {
       setStatusMsg("HATA");
-      setErr(
-        "VITE_API_BASE boş. .env (local) veya Vercel Environment Variables (prod) içinde tanımla."
-      );
+      setErr("VITE_API_BASE boş. .env veya Vercel Environment Variables içine gir.");
+      return;
     }
-  }, [apiBase]);
+    if (!adminToken) {
+      setStatusMsg("HATA");
+      setErr("VITE_ADMIN_TOKEN boş. .env veya Vercel Environment Variables içine gir.");
+      return;
+    }
+  }, [apiBase, adminToken]);
 
   const headers = useMemo(() => {
     const h = { "Content-Type": "application/json" };
@@ -80,7 +78,6 @@ export default function App() {
     setErr("");
     setLoading(true);
     try {
-      // ✅ DOĞRU endpoint
       const url = joinUrl(apiBase, "api/products");
       const res = await fetch(url);
 
@@ -112,7 +109,6 @@ export default function App() {
 
     setLoading(true);
     try {
-      // ✅ DOĞRU endpoint
       const url = joinUrl(apiBase, "api/products");
       const res = await fetch(url, {
         method: "POST",
@@ -151,22 +147,16 @@ export default function App() {
       <div className="status">
         <div>Durum: {statusMsg}</div>
 
-        {/* ✅ API URL input yok. Sadece gösterim */}
         <div style={{ marginTop: 8, opacity: 0.9 }}>
           API (env): <b>{apiBase || "(tanımlı değil)"}</b>
+        </div>
+
+        <div style={{ marginTop: 6, opacity: 0.8 }}>
+          Admin Token: <b>{adminToken ? "✅ Tanımlı" : "❌ Yok"}</b>
         </div>
       </div>
 
       {err ? <div className="error">{err}</div> : null}
-
-      <hr />
-
-      <h2>Admin Token</h2>
-      <input
-        value={adminToken}
-        onChange={(e) => setAdminToken(e.target.value)}
-        placeholder="ADMIN TOKEN"
-      />
 
       <hr />
 
