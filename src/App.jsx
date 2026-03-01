@@ -43,7 +43,7 @@ export default function App() {
 
   const headers = useMemo(() => {
     const h = { "Content-Type": "application/json" };
-    if (adminToken) h["Authorization"] = `Bearer ${adminToken}`; // ✅ standart
+    if (adminToken) h["Authorization"] = `Bearer ${adminToken}`;
     return h;
   }, [adminToken]);
 
