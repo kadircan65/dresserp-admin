@@ -1,114 +1,172 @@
-// server.js
-require("dotenv").config();
+import { useEffect, useState } from "react";
 
-const express = require("express");
-const cors = require("cors");
-const jwt = require("jsonwebtoken");
+const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 
-const productsRoutes = require("./routes/products");
-const storesRoutes = require("./routes/stores");
-const uploadRoutes = require("./routes/upload");
+export default function App() {
+  const [products, setProducts] = useState([]);
+  const [status, setStatus] = useState("Hazır");
+  const [error, setError] = useState("");
 
-const app = express();
+  const [adminPassword, setAdminPassword] = useState("");
+  const [token, setToken] = useState(localStorage.getItem("admin_token") || "");
 
-/**
- * CORS
- * - VITE_ORIGIN: admin panel domain (vercel) -> örn: https://dresserp-admin.vercel.app
- * - İstersen localhost da ekleyebilirsin (dev için).
- */
-const allowedOrigins = [
-  process.env.VITE_ORIGIN,
-  "http://localhost:5173",
-  "http://localhost:3000",
-].filter(Boolean);
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
 
-const corsOptions = {
-  origin: function (origin, cb) {
-    // origin yoksa (server-to-server / postman) izin ver
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error("Not allowed by CORS: " + origin));
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false,
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
-
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
-
-// ===== HEALTH =====
-app.get("/api/health", (req, res) => res.json({ ok: true }));
-
-// ===== ADMIN AUTH (JWT) =====
-app.post("/api/admin/login", (req, res) => {
-  try {
-    const { password } = req.body || {};
-
-    if (!process.env.ADMIN_PASSWORD) {
-      return res.status(500).json({ error: "admin_password_missing" });
+  async function healthCheck() {
+    setError("");
+    try {
+      const r = await fetch(`${API_BASE}/health`);
+      if (!r.ok) throw new Error("Health başarısız");
+      setStatus("API OK");
+    } catch (e) {
+      setStatus("API HATA");
+      setError("Backend bağlantı hatası. VITE_API_BASE / Render kontrol et.");
     }
-    if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ error: "jwt_secret_missing" });
-    }
-    if (!password) {
-      return res.status(400).json({ error: "password_required" });
-    }
-    if (password !== process.env.ADMIN_PASSWORD) {
-      return res.status(401).json({ error: "invalid_password" });
-    }
-
-    const token = jwt.sign({ role: "admin" }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
-
-    return res.json({ token });
-  } catch (e) {
-    console.error("admin_login_error:", e);
-    return res.status(500).json({ error: "server_error" });
   }
-});
 
-// Token doğru mu diye frontend açılışında kontrol edelim (auto login için)
-app.get("/api/admin/verify", (req, res) => {
-  try {
-    const auth = req.headers.authorization || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-
-    if (!token) return res.status(401).json({ error: "missing_token" });
-    if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ error: "jwt_secret_missing" });
+  async function fetchProducts() {
+    setError("");
+    try {
+      const r = await fetch(`${API_BASE}/api/products`);
+      if (!r.ok) throw new Error("Ürünler çekilemedi");
+      const data = await r.json();
+      setProducts(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setError("Ürünler çekilemedi.");
     }
-
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    if (payload?.role !== "admin") {
-      return res.status(403).json({ error: "forbidden" });
-    }
-
-    return res.json({ ok: true });
-  } catch (e) {
-    return res.status(401).json({ error: "invalid_token" });
   }
-});
 
-// ===== ROUTES =====
-app.use("/api/products", productsRoutes);
-app.use("/api/stores", storesRoutes);
-app.use("/api/upload", uploadRoutes);
+  async function adminLogin() {
+    setError("");
+    try {
+      const r = await fetch(`${API_BASE}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: adminPassword }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Login başarısız");
 
-// ===== 404 =====
-app.use((req, res) => {
-  res.status(404).json({ error: "not_found" });
-});
+      localStorage.setItem("admin_token", data.token);
+      setToken(data.token);
+      setAdminPassword("");
+    } catch (e) {
+      setError(String(e.message || e));
+    }
+  }
 
-// ===== ERROR HANDLER =====
-app.use((err, req, res, next) => {
-  console.error("SERVER_ERROR:", err);
-  res.status(500).json({ error: "server_error" });
-});
+  function logout() {
+    localStorage.removeItem("admin_token");
+    setToken("");
+  }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Listening on", PORT));
+  async function addProduct() {
+    setError("");
+    try {
+      const r = await fetch(`${API_BASE}/api/products`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name,
+          price: Number(price),
+          image_url: imageUrl || null,
+        }),
+      });
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || "Ürün eklenemedi");
+
+      setName("");
+      setPrice("");
+      setImageUrl("");
+      await fetchProducts();
+    } catch (e) {
+      setError(String(e.message || e));
+    }
+  }
+
+  useEffect(() => {
+    healthCheck();
+    fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div style={{ maxWidth: 720, margin: "40px auto", fontFamily: "system-ui" }}>
+      <h1>DRESSERP Admin</h1>
+
+      <div style={{ marginBottom: 12 }}>
+        <div>API (env): {API_BASE}</div>
+        <div>Durum: {status}</div>
+      </div>
+
+      {error ? (
+        <div style={{ padding: 10, background: "#ffe5e5", marginBottom: 12 }}>
+          {error}
+        </div>
+      ) : null}
+
+      <hr />
+
+      <h2>Admin Login</h2>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="password"
+          placeholder="Admin şifre"
+          value={adminPassword}
+          onChange={(e) => setAdminPassword(e.target.value)}
+        />
+        <button onClick={adminLogin}>Giriş Yap</button>
+        <button onClick={logout} disabled={!token}>
+          Çıkış
+        </button>
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        Yetki: {token ? "✅ Login OK (token var)" : "❌ Token yok"}
+      </div>
+
+      <hr />
+
+      <h2>Ürün Ekle</h2>
+      <div style={{ display: "grid", gap: 8, maxWidth: 420 }}>
+        <input
+          placeholder="Ürün adı"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          placeholder="Fiyat"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        <input
+          placeholder="Görsel URL (opsiyonel)"
+          value={imageUrl}
+          onChange={(e) => setImageUrl(e.target.value)}
+        />
+        <button onClick={addProduct} disabled={!token}>
+          EKLE
+        </button>
+      </div>
+
+      <hr />
+
+      <h2>Ürünler ({products.length})</h2>
+      <button onClick={fetchProducts}>Yenile</button>
+
+      <ul>
+        {products.map((p) => (
+          <li key={p.id}>
+            {p.name} — {p.price}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
