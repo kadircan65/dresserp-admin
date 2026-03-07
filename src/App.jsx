@@ -1,237 +1,394 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const API = import.meta.env.VITE_API_BASE; // örn: https://dresserp-backend.onrender.com
+const API = import.meta.env.VITE_API_BASE;
+const MASTER_KEY = import.meta.env.VITE_MASTER_KEY || "";
+
+function getStoreFromQuery() {
+  const p = new URLSearchParams(window.location.search);
+  return (p.get("store") || "").trim().toLowerCase();
+}
 
 export default function App() {
-  const [apiOk, setApiOk] = useState(null);
+  const [apiStatus, setApiStatus] = useState(false);
 
-  // login
+  const [store, setStore] = useState(getStoreFromQuery() || "main");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState(localStorage.getItem("admin_token") || "");
-  const [loginMsg, setLoginMsg] = useState("");
+  const [tokenStore, setTokenStore] = useState(localStorage.getItem("admin_store") || "");
 
-  // product form
+  const [storeName, setStoreName] = useState("");
+  const [whats, setWhats] = useState("");
+
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
-  const [image_url, setImageUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
 
-  // products list
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+  const [items, setItems] = useState([]);
+  const [msg, setMsg] = useState("");
+
+  // yeni mağaza oluşturma
+  const [newSlug, setNewSlug] = useState("");
+  const [newStoreName, setNewStoreName] = useState("");
+  const [newWhats, setNewWhats] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  const isAuthed = useMemo(() => !!token && tokenStore === store, [token, tokenStore, store]);
+
+  const api = (path) => `${API}${path}`;
 
   useEffect(() => {
-    // API health check
-    const check = async () => {
-      try {
-        const r = await fetch(`${API}/api/health`);
-        const j = await r.json();
-        setApiOk(!!j?.ok);
-      } catch (e) {
-        setApiOk(false);
-      }
-    };
-    if (API) check();
+    const url = new URL(window.location.href);
+    if (store) url.searchParams.set("store", store);
+    else url.searchParams.delete("store");
+    window.history.replaceState({}, "", url.toString());
+  }, [store]);
+
+  useEffect(() => {
+    checkApi();
+    if (store) {
+      fetchStore();
+      fetchProducts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const login = async () => {
-    setLoginMsg("");
-    setErr("");
+  async function checkApi() {
     try {
-      const res = await fetch(`${API}/api/admin/login`, {
+      const r = await fetch(`${API}/health`);
+      setApiStatus(r.ok);
+    } catch {
+      setApiStatus(false);
+    }
+  }
+
+  async function fetchStore() {
+    if (!store) return;
+
+    try {
+      const r = await fetch(api(`/api/s/${store}/store`));
+      const data = await r.json();
+
+      if (!r.ok) {
+        setMsg(`Store hata: ${data?.error || r.status}`);
+        return;
+      }
+
+      setStoreName(data.store_name || "");
+      setWhats(data.whatsapp_number || "");
+    } catch {
+      setMsg("Store fetch failed");
+    }
+  }
+
+  async function fetchProducts() {
+    if (!store) return;
+
+    try {
+      const r = await fetch(api(`/api/s/${store}/products`));
+      const data = await r.json();
+
+      if (!r.ok) {
+        setMsg(`Ürün hata: ${data?.error || r.status}`);
+        return;
+      }
+
+      setItems(Array.isArray(data) ? data : []);
+    } catch {
+      setMsg("Products fetch failed");
+    }
+  }
+
+  async function loadStore() {
+    setMsg("");
+    await checkApi();
+    await fetchStore();
+    await fetchProducts();
+  }
+
+  async function createStore() {
+    setMsg("");
+
+    try {
+      const r = await fetch(api(`/api/s/create`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-master-key": MASTER_KEY,
+        },
+        body: JSON.stringify({
+          slug: newSlug,
+          store_name: newStoreName,
+          whatsapp_number: newWhats,
+          admin_password: newPassword,
+        }),
+      });
+
+      const data = await r.json();
+
+      if (!r.ok) {
+        setMsg(`Mağaza oluşturma hata: ${data?.error || r.status}`);
+        return;
+      }
+
+      setMsg(`Mağaza oluşturuldu ✅ slug: ${data.store.slug}`);
+      setStore(data.store.slug);
+
+      setNewSlug("");
+      setNewStoreName("");
+      setNewWhats("");
+      setNewPassword("");
+
+      await checkApi();
+      await fetchStore();
+      await fetchProducts();
+    } catch {
+      setMsg("Mağaza oluşturma failed");
+    }
+  }
+
+  async function login() {
+    setMsg("");
+
+    try {
+      const r = await fetch(api(`/api/s/${store}/admin/login`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       });
 
-      const data = await res.json().catch(() => ({}));
+      const data = await r.json();
 
-      if (!res.ok) {
-        setLoginMsg(`Login failed: ${data?.error || "unknown_error"}`);
+      if (!r.ok) {
+        setMsg(`Login hata: ${data?.error || r.status}`);
         return;
       }
 
-      if (data?.token) {
-        setToken(data.token);
-        localStorage.setItem("admin_token", data.token);
-        setLoginMsg("✅ Login OK (token alındı)");
-      } else {
-        setLoginMsg("Login failed: token gelmedi");
-      }
-    } catch (e) {
-      setLoginMsg("Login failed: network_error");
-    }
-  };
+      setToken(data.token);
+      setTokenStore(store);
+      localStorage.setItem("admin_token", data.token);
+      localStorage.setItem("admin_store", store);
 
-  const logout = () => {
+      setMsg("Login OK ✅");
+    } catch {
+      setMsg("Login failed");
+    }
+  }
+
+  function logout() {
     setToken("");
+    setTokenStore("");
     localStorage.removeItem("admin_token");
-    setLoginMsg("Çıkış yapıldı.");
-  };
+    localStorage.removeItem("admin_store");
+    setMsg("Çıkış yapıldı");
+  }
 
-  const fetchProducts = async () => {
-    setErr("");
-    setLoading(true);
+  async function saveStoreSettings() {
+    setMsg("");
+    if (!isAuthed) {
+      setMsg("Önce login ol");
+      return;
+    }
+
     try {
-      const res = await fetch(`${API}/api/products`);
-      const data = await res.json().catch(() => ({}));
+      const r = await fetch(api(`/api/s/${store}/store`), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          store_name: storeName,
+          whatsapp_number: whats,
+        }),
+      });
 
-      if (!res.ok) {
-        setErr(`Ürünleri çekemedi: ${data?.error || "unknown_error"}`);
-        setProducts([]);
+      const data = await r.json();
+
+      if (!r.ok) {
+        setMsg(`Ayar kaydetme hata: ${data?.error || r.status}`);
         return;
       }
 
-      setProducts(Array.isArray(data) ? data : []);
-    } catch (e) {
-      setErr("Ürünleri çekemedi: network_error");
-      setProducts([]);
-    } finally {
-      setLoading(false);
+      setStoreName(data.store_name || "");
+      setWhats(data.whatsapp_number || "");
+      setMsg("Ayarlar kaydedildi ✅");
+    } catch {
+      setMsg("Ayar kaydetme failed");
     }
-  };
+  }
 
-  const addProduct = async () => {
-    setErr("");
-    if (!token) {
-      setErr("Önce admin login ol (token yok).");
-      return;
-    }
-    if (!name.trim()) {
-      setErr("Ürün adı boş olamaz.");
-      return;
-    }
-
-    const p = Number(price);
-    if (!Number.isFinite(p) || p <= 0) {
-      setErr("Fiyat geçersiz.");
+  async function addProduct() {
+    setMsg("");
+    if (!isAuthed) {
+      setMsg("Önce login ol");
       return;
     }
 
     try {
-      const res = await fetch(`${API}/api/products`, {
+      const r = await fetch(api(`/api/s/${store}/products`), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: name.trim(),
-          price: p,
-          image_url: image_url.trim() || null,
+          name,
+          price,
+          image_url: imageUrl,
         }),
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setErr(`Ekleme hatası: ${data?.error || "unknown_error"}`);
+      const data = await r.json();
+
+      if (!r.ok) {
+        setMsg(`Ürün ekleme hata: ${data?.error || r.status}`);
         return;
       }
 
       setName("");
       setPrice("");
       setImageUrl("");
+      setMsg("Ürün eklendi ✅");
+
       await fetchProducts();
-      alert("✅ Ürün eklendi");
-    } catch (e) {
-      setErr("Ekleme hatası: network_error");
+    } catch {
+      setMsg("Ürün ekleme failed");
     }
-  };
+  }
 
   return (
-    <div className="container">
+    <div className="wrap">
       <h1>DRESSERP Admin</h1>
+      <div className="sub">API: {API}</div>
+      <div className="sub">Durum: {apiStatus ? "✅ API erişiliyor" : "❌ API erişilemiyor"}</div>
 
-      <div className="muted">
-        API: <b>{API || "(VITE_API_BASE yok)"}</b>
-      </div>
-      <div className="muted">
-        Durum:{" "}
-        {apiOk === null
-          ? "Kontrol ediliyor..."
-          : apiOk
-          ? "✅ API OK"
-          : "❌ API erişilemiyor"}
+      <hr />
+
+      <div className="card">
+        <h2>Yeni Mağaza Oluştur</h2>
+        <div className="row">
+          <input
+            placeholder="slug (örn omurhobi)"
+            value={newSlug}
+            onChange={(e) => setNewSlug(e.target.value.trim().toLowerCase())}
+          />
+          <input
+            placeholder="mağaza adı"
+            value={newStoreName}
+            onChange={(e) => setNewStoreName(e.target.value)}
+          />
+        </div>
+
+        <div className="row">
+          <input
+            placeholder="whatsapp (905...)"
+            value={newWhats}
+            onChange={(e) => setNewWhats(e.target.value)}
+          />
+          <input
+            type="password"
+            placeholder="admin şifre"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <button onClick={createStore}>Mağaza Aç</button>
+        </div>
       </div>
 
       <hr />
 
-      <h2>Admin Login</h2>
-      {!token ? (
+      <div className="card">
+        <h2>Admin Login</h2>
+        <div className="row">
+          <input
+            placeholder="store slug"
+            value={store}
+            onChange={(e) => setStore(e.target.value.trim().toLowerCase())}
+          />
+          <button onClick={loadStore}>Yükle</button>
+        </div>
+
         <div className="row">
           <input
             type="password"
-            placeholder="Admin şifre"
+            placeholder="admin şifre"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           <button onClick={login}>Giriş Yap</button>
-          {loginMsg && <div className="msg">{loginMsg}</div>}
-        </div>
-      ) : (
-        <div className="row">
-          <div className="msg">✅ Token var (login OK)</div>
           <button onClick={logout}>Çıkış</button>
         </div>
-      )}
 
-      <hr />
-
-      <h2>Ürün Ekle</h2>
-      <div className="row">
-        <input
-          placeholder="Ürün adı"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          placeholder="Fiyat"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-        />
-        <input
-          placeholder="Görsel URL (opsiyonel)"
-          value={image_url}
-          onChange={(e) => setImageUrl(e.target.value)}
-        />
-        <button onClick={addProduct}>EKLE</button>
+        <div className="sub">{isAuthed ? "✅ Giriş var" : "⛔ Giriş yok"}</div>
       </div>
 
       <hr />
 
-      <h2>Ürünler</h2>
-      <div className="row">
-        <button onClick={fetchProducts}>
-          {loading ? "Yükleniyor..." : "Yenile"}
-        </button>
+      <div className="card">
+        <h2>Mağaza Ayarları</h2>
+        <div className="row">
+          <input
+            placeholder="mağaza adı"
+            value={storeName}
+            onChange={(e) => setStoreName(e.target.value)}
+          />
+          <input
+            placeholder="whatsapp"
+            value={whats}
+            onChange={(e) => setWhats(e.target.value)}
+          />
+          <button onClick={saveStoreSettings}>Kaydet</button>
+        </div>
       </div>
 
-      {err && <div className="error">Hata: {err}</div>}
+      <hr />
 
-      <div className="list">
-        {products.length === 0 ? (
-          <div className="muted">Ürün yok.</div>
-        ) : (
-          products.map((p) => (
-            <div className="card" key={p.id}>
-              <div>
-                <b>{p.name}</b>
+      <div className="card">
+        <h2>Ürün Ekle</h2>
+        <div className="row">
+          <input
+            placeholder="Ürün adı"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            placeholder="Fiyat"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+          <input
+            placeholder="Görsel URL (opsiyonel)"
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+          />
+          <button onClick={addProduct}>EKLE</button>
+        </div>
+      </div>
+
+      <hr />
+
+      <div className="card">
+        <h2>Ürünler</h2>
+        <button onClick={fetchProducts}>Yenile</button>
+
+        <div className="list">
+          {items.length === 0 ? (
+            <p>Ürün yok.</p>
+          ) : (
+            items.map((p) => (
+              <div key={p.id} className="item">
+                <div><b>{p.name}</b></div>
+                <div>{Number(p.price).toLocaleString("tr-TR")} ₺</div>
+                <div>{p.image_url ? "görsel var" : "görsel yok"}</div>
+                <div>store_id: {p.store_id}</div>
               </div>
-              <div className="muted">₺ {p.price}</div>
-              {p.image_url ? (
-                <a href={p.image_url} target="_blank" rel="noreferrer">
-                  görsel
-                </a>
-              ) : (
-                <span className="muted">görsel yok</span>
-              )}
-            </div>
-          ))
-        )}
+            ))
+          )}
+        </div>
       </div>
 
-      <div className="footer">© 2026 Dresserp</div>
+      {msg ? <div className="msg">{msg}</div> : null}
     </div>
   );
 }
