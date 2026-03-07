@@ -27,7 +27,6 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [msg, setMsg] = useState("");
 
-  // yeni mağaza oluşturma
   const [newSlug, setNewSlug] = useState("");
   const [newStoreName, setNewStoreName] = useState("");
   const [newWhats, setNewWhats] = useState("");
@@ -257,16 +256,50 @@ export default function App() {
     }
   }
 
+  async function deleteProduct(id) {
+    setMsg("");
+    if (!isAuthed) {
+      setMsg("Önce login ol");
+      return;
+    }
+
+    const ok = window.confirm("Bu ürünü silmek istiyor musun?");
+    if (!ok) return;
+
+    try {
+      const r = await fetch(api(`/api/s/${store}/products/${id}`), {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await r.json();
+
+      if (!r.ok) {
+        setMsg(`Ürün silme hata: ${data?.error || r.status}`);
+        return;
+      }
+
+      setMsg("Ürün silindi ✅");
+      await fetchProducts();
+    } catch {
+      setMsg("Ürün silme failed");
+    }
+  }
+
   return (
     <div className="wrap">
       <h1>DRESSERP Admin</h1>
+
       <div className="sub">API: {API}</div>
       <div className="sub">Durum: {apiStatus ? "✅ API erişiliyor" : "❌ API erişilemiyor"}</div>
 
       <hr />
 
-      <div className="card">
+      <section className="card">
         <h2>Yeni Mağaza Oluştur</h2>
+
         <div className="row">
           <input
             placeholder="slug (örn omurhobi)"
@@ -282,7 +315,7 @@ export default function App() {
 
         <div className="row">
           <input
-            placeholder="whatsapp (905...)"
+            placeholder="WhatsApp (905...)"
             value={newWhats}
             onChange={(e) => setNewWhats(e.target.value)}
           />
@@ -294,12 +327,13 @@ export default function App() {
           />
           <button onClick={createStore}>Mağaza Aç</button>
         </div>
-      </div>
+      </section>
 
       <hr />
 
-      <div className="card">
+      <section className="card">
         <h2>Admin Login</h2>
+
         <div className="row">
           <input
             placeholder="store slug"
@@ -321,12 +355,13 @@ export default function App() {
         </div>
 
         <div className="sub">{isAuthed ? "✅ Giriş var" : "⛔ Giriş yok"}</div>
-      </div>
+      </section>
 
       <hr />
 
-      <div className="card">
+      <section className="card">
         <h2>Mağaza Ayarları</h2>
+
         <div className="row">
           <input
             placeholder="mağaza adı"
@@ -334,18 +369,19 @@ export default function App() {
             onChange={(e) => setStoreName(e.target.value)}
           />
           <input
-            placeholder="whatsapp"
+            placeholder="WhatsApp"
             value={whats}
             onChange={(e) => setWhats(e.target.value)}
           />
           <button onClick={saveStoreSettings}>Kaydet</button>
         </div>
-      </div>
+      </section>
 
       <hr />
 
-      <div className="card">
+      <section className="card">
         <h2>Ürün Ekle</h2>
+
         <div className="row">
           <input
             placeholder="Ürün adı"
@@ -364,12 +400,13 @@ export default function App() {
           />
           <button onClick={addProduct}>EKLE</button>
         </div>
-      </div>
+      </section>
 
       <hr />
 
-      <div className="card">
+      <section className="card">
         <h2>Ürünler</h2>
+
         <button onClick={fetchProducts}>Yenile</button>
 
         <div className="list">
@@ -381,12 +418,13 @@ export default function App() {
                 <div><b>{p.name}</b></div>
                 <div>{Number(p.price).toLocaleString("tr-TR")} ₺</div>
                 <div>{p.image_url ? "görsel var" : "görsel yok"}</div>
-                <div>store_id: {p.store_id}</div>
+                <div>Ürün ID: {p.id}</div>
+                <button onClick={() => deleteProduct(p.id)}>Sil</button>
               </div>
             ))
           )}
         </div>
-      </div>
+      </section>
 
       {msg ? <div className="msg">{msg}</div> : null}
     </div>
